@@ -1,2 +1,2 @@
-# natsv2.go
-Exploring some ideas for a NATS V2 Go client
+# NATS v2 Go client
+Exploring some ideas.
