@@ -135,13 +135,27 @@ func Connect(url string, opts ...nats.Option) (Connection, error) {
 	return &conn{nc: nc}, nil
 }
 
+func foo() {
+	subj := "natsv2.x.foo"
+
+	nc, _ := Connect("demo.nats.io")
+	nc.Publish(subj, "Hello World!")
+
+	nc2, _ := nats.Connect("demo.nats.io")
+	nc2.Publish(subj, []byte("Hello NATS World"))
+}
+
 func main() {
+	foo()
+
 	nc, err := Connect("demo.nats.io")
 	if err != nil {
 		log.Fatalf("Could not connect: %v\n", err)
 	}
 
 	tsubj := "natsv2.foo"
+
+	nc.Stream(tsubj).WithEncoder().Publish()
 
 	// Do basic style publish.
 	nc.Publish(tsubj, "Hello World!")
@@ -198,4 +212,70 @@ func Base64(in []byte) []byte {
 	out := make([]byte, base64.StdEncoding.EncodedLen(len(in)))
 	base64.StdEncoding.Encode(out, in)
 	return out
+}
+
+func ex() {
+
+	curTemp := &sensor{Name: "sensor-22", Temp: 52}
+
+	stream := nc.Stream("foo.bar")
+	// Defaults to JSON
+	stream.Publish(curTemp)
+	// With middleware at publish.
+	stream.Publish(tsubj, nats.Base64(nats.Gzip(nats.Protobuf(me))))
+	// As part of stream construction. Better choices here but hopefully idea resonates.
+	stream2 := nc.Stream(subject, nats.Base64(), nats.Gzip(), nats.JSON())
+
+	// JetStream
+	// Sets up for publishes to watch for publish acks, etc.
+	stream := nc.Stream(subject, nats.JetStreamStream("MY_ORDERS"))
+
+	// Consumers
+	stream.Subscribe()
+	stream.Subscribe(nats.Queue("prod-v1"))
+	stream.Subscribe(nats.Handler(func(msg *nats.Msg) {}))
+
+	// JetStream
+	stream.Subscribe(nats.JetStreamConsumer(opts))
+
+	// Requests
+	nc.Request("service", "2+2")
+	nc.Request("service", "2+2", nats.Timeout(2*time.Second))
+
+	ctx, cancelCB := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelCB() // should always be called, not discarded, to prevent context leak
+
+	nc.Request("service", "2+2", nats.Context(ctx))
+
+	// Chunked responses.
+	nc.Request("service", "video-22", nats.Chunked())
+
+	// Streamed responses.
+	nc.Request("service", "video-22", nats.Streamed(func(msg *nats.Msg)))
+
+	// Over JetStream
+	nc.Request("service", "2+2", nats.JetStreamStream("NEW_ORDERS"))
+
+	// Services.
+	// The second arg is for queue group which will be on by default.
+	svc := nats.Service("my.service", "prod.v1.1")
+	svc := nats.Service("my.service", "prod.v1.1", nats.Handler(func(msg *nats.Msg) {}))
+	// Will drain by default etc.
+	svc.Shutdown()
+
+	// Can also have discover and health endpoints, etc. Possibly on by default?
+	nats.Service("my.service", "prod.v1.1", nats.Discover("services.my.service", "description?"))
+	// Can be chained as well.
+	svc := nats.Service("my.service", "prod.v1.1")
+	svc.Discover("services.my.service", "description?")
+	// Same as stream sub above with same options.
+	svc.Health("my.service.healthz")
+
+	// Also directly support HTTP handlers. Protecting current investments, tech, libraries.
+	svc := nats.Service("my.service", "prod.v1.1", nats.HTTPHandler(func(w http.ResponseWriter, req *http.Request) {
+		w.Header.Add("NATS-X", "yes")
+		w.WriteHeaders(200)
+		io.WriteString(w, fmt.Sprintf("Hello from NATS for %q!\n", req.URL.Path))
+	}))
+
 }
